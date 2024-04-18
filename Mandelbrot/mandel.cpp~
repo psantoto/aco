@@ -1,0 +1,113 @@
+// Main code for the Mandelbrot practice -- Created by Pablo Santo-Tomás Ros
+
+#include <iostream>
+#include <fstream>
+#include <complex>
+#include <omp.h>
+
+/* I have read that using const prevents the program
+   from changing the variable, so I will be using it
+   here and there
+ */
+
+const int MAXITERATIONS = 100;
+const double MIN_REAL = -2;
+const double MAX_REAL = 0.5;
+const double MIN_IMG = -1.1;
+const double MAX_IMG = 1.1;
+
+/* I pass C by reference to make it more efficient,
+   but use const to protect it from being modified.
+ */
+bool mandelbrot(const std::complex<double>& C) {
+    std::complex<double> z = 0;
+    int iterations = 0;
+    while (std::abs(z) < 2 && iterations < MAXITERATIONS) {
+        z = z * z + C;
+        iterations++;
+    }
+    return iterations == MAXITERATIONS;
+}
+
+/* I write it as a function to make the code clearer.
+   I need to input variables as pointers because I will
+   dynamically allocate them. I also need to introduce
+   the size of the arrays, because that information is
+   not stored by the pointer.
+ */
+void createMandelbrotFile(const char* filename, double* c_real, double* c_img, bool* notdiverged, int POINTS_PER_DIMENSION) {
+    std::ofstream out(filename);
+
+    for (int i = 0; i < POINTS_PER_DIMENSION; ++i) {
+        for (int j = 0; j < POINTS_PER_DIMENSION; ++j) {
+            if (notdiverged[i * POINTS_PER_DIMENSION + j]) {
+                out << c_real[i] << " " << c_img[j] << std::endl;
+            }
+        }
+    }
+
+    out.close();
+}
+
+int main() {
+    int POINTS_PER_DIMENSION;
+    std::string PLOT_NAME;
+    std::cout << "Number of points per axis: ";
+    std::cin >> POINTS_PER_DIMENSION;
+    std::cout << "Name of output file (no extension): ";
+    std::cin >> PLOT_NAME;
+    PLOT_NAME += ".png";
+
+    double* c_real = new double[POINTS_PER_DIMENSION];
+    double* c_img = new double[POINTS_PER_DIMENSION];
+    bool* notdiverged = new bool[POINTS_PER_DIMENSION * POINTS_PER_DIMENSION];
+
+    for (int i = 0; i < POINTS_PER_DIMENSION; ++i) {
+        c_real[i] = MIN_REAL + i * (MAX_REAL - MIN_REAL) / (POINTS_PER_DIMENSION - 1);
+        c_img[i] = MIN_IMG + i * (MAX_IMG - MIN_IMG) / (POINTS_PER_DIMENSION - 1);
+    }
+
+    /* I tried parallelizing  all three loops (including the one
+       inside the mandelbrot function) and the two outter loops
+       using collapse(), but parallelizing just the first loop
+       gives the best performance in my computer.
+     */
+    double start_time = omp_get_wtime();
+    
+    #pragma omp for schedule(dynamic)
+    for (int i = 0; i < POINTS_PER_DIMENSION; ++i) {
+        for (int j = 0; j < POINTS_PER_DIMENSION; ++j) {
+            std::complex<double> c(c_real[i], c_img[j]);
+            notdiverged[i * POINTS_PER_DIMENSION + j] = mandelbrot(c);
+        }
+    }
+
+    double end_time = omp_get_wtime();
+    double elapsed_time = end_time - start_time;
+    std::cout << "Time taken for parallel computation: " << elapsed_time << " seconds" << std::endl;
+
+    createMandelbrotFile("mandelbrot.dat", c_real, c_img, notdiverged, POINTS_PER_DIMENSION);
+
+    std::ofstream gp("mandelbrot.gp");
+
+    gp << "set terminal png size " << POINTS_PER_DIMENSION << "," << POINTS_PER_DIMENSION << "\n";
+    gp << "set output '" << PLOT_NAME << "'\n";
+    gp << "set xrange [-2:0.5]\n";
+    gp << "set yrange [-1.1:1.1]\n";
+    gp << "set xlabel 'Re(C)'";
+    gp << "set ylabel 'Im(C)'";
+    gp << "unset key\n";
+    gp << "plot 'mandelbrot.dat' u 1:2 with points pt 7 ps 0.5 lc rgb 'red'\n";
+
+    gp.close();
+
+    system("gnuplot mandelbrot.gp");
+
+    std::cout << "Plot generated as " << PLOT_NAME << std::endl; // Just to be sure I find the file
+
+    delete[] c_real;
+    delete[] c_img;
+    delete[] notdiverged;
+
+    return 0;
+}
